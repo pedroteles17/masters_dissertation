@@ -117,7 +117,7 @@ class MercadoLivreScraper:
             
             return pd.concat([df for df in parsed_sellers if not df.empty], ignore_index=True)
         
-        return {"product_id": product_id} | all_sellers
+        return all_sellers
 
     def get_sellers_by_product(self, product_id: str, offset = 0, parse = False) -> dict[str, any]:
         url = f"{self.URL}products/{product_id}/items/?offset={offset}"
