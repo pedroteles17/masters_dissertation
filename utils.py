@@ -7,6 +7,7 @@ import os
 import json
 from dotenv import set_key
 
+
 class MakeRequest:
     def __init__(
         self,
@@ -57,6 +58,7 @@ class MakeRequest:
             "Referer": "https://www.google.com/",
             "User-Agent": UserAgent().random,
         }
+
 
 class MercadoLivreScraper:
     URL = "https://api.mercadolibre.com/"
@@ -113,13 +115,19 @@ class MercadoLivreScraper:
             for seller in all_sellers:
                 seller["product_id"] = product_id
                 parsed = MercadoLivreParser(seller).parse_sellers_by_product()
-                parsed_sellers.append(parsed.dropna(axis=1, how='all')) # Drop empty columns
-            
-            return pd.concat([df for df in parsed_sellers if not df.empty], ignore_index=True)
-        
+                parsed_sellers.append(
+                    parsed.dropna(axis=1, how="all")
+                )  # Drop empty columns
+
+            return pd.concat(
+                [df for df in parsed_sellers if not df.empty], ignore_index=True
+            )
+
         return all_sellers
 
-    def get_sellers_by_product(self, product_id: str, offset = 0, parse = False) -> dict[str, any]:
+    def get_sellers_by_product(
+        self, product_id: str, offset=0, parse=False
+    ) -> dict[str, any]:
         url = f"{self.URL}products/{product_id}/items/?offset={offset}"
         response = MakeRequest(None, self._get_headers()).get(url)
         if parse and response:
@@ -152,12 +160,16 @@ class MercadoLivreScraper:
             return MercadoLivreParser(response.json()).parse_best_selling_by_category()
         return response.json() if response else None
 
-    def list_all_items_by_user(self, user_id: str, n_items = 1000, parameters: dict[str, str] = None) -> dict[str, any]:
+    def list_all_items_by_user(
+        self, user_id: str, n_items=1000, parameters: dict[str, str] = None
+    ) -> dict[str, any]:
         items = []
         scroll_id = None
 
-        for _ in tqdm.tqdm(range(n_items//100), total=n_items//100):
-            seller_items = self.list_items_by_user(user_id, scroll_id=scroll_id, parameters=parameters)
+        for _ in tqdm.tqdm(range(n_items // 100), total=n_items // 100):
+            seller_items = self.list_items_by_user(
+                user_id, scroll_id=scroll_id, parameters=parameters
+            )
             if not seller_items:
                 break
 
@@ -169,7 +181,9 @@ class MercadoLivreScraper:
 
         return items
 
-    def list_items_by_user(self, user_id: str, parameters: dict, scroll_id = None) -> dict[str, any]:
+    def list_items_by_user(
+        self, user_id: str, parameters: dict, scroll_id=None
+    ) -> dict[str, any]:
         url = f"{self.URL}users/{user_id}/items/search?limit=100"
         if parameters:
             url += "&" + "&".join([f"{k}={v}" for k, v in parameters.items()])
@@ -177,8 +191,10 @@ class MercadoLivreScraper:
             url += f"&scroll_id={scroll_id}"
         response = MakeRequest(None, self._get_headers()).get(url)
         return response.json() if response else None
-        
-    def list_items_by_seller(self, seller_id: str, category_id: str, sleep_seconds = 0.5) -> dict[str, any]:
+
+    def list_items_by_seller(
+        self, seller_id: str, category_id: str, sleep_seconds=0.5
+    ) -> dict[str, any]:
         url = f"{self.URL}sites/MLB/search?seller_id={seller_id}&category={category_id}&offset=0"
         response = MakeRequest(None, self._get_headers()).get(url)
 
@@ -186,7 +202,9 @@ class MercadoLivreScraper:
         page_size = response.json()["paging"]["limit"]
 
         products_info = []
-        for i in tqdm.tqdm(range(0, total_pages, page_size), total=total_pages//page_size):
+        for i in tqdm.tqdm(
+            range(0, total_pages, page_size), total=total_pages // page_size
+        ):
             try:
                 time.sleep(sleep_seconds)
                 url = f"{self.URL}sites/MLB/search?seller_id={seller_id}&category={category_id}&offset={i}&orders=available_quantity_desc"
@@ -199,7 +217,7 @@ class MercadoLivreScraper:
         return {
             "products_info": products_info,
             "total_pages": total_pages,
-            "page_size": page_size
+            "page_size": page_size,
         }
 
     def _get_headers(self) -> dict[str, str]:
@@ -219,10 +237,17 @@ class MercadoLivreParser:
         if catalog["status"] == "not_listed":
             return pd.json_normalize(catalog)
 
-        catalog.update({boost["id"]: boost["status"] for boost in catalog.pop("boosts", [])})
+        catalog.update(
+            {boost["id"]: boost["status"] for boost in catalog.pop("boosts", [])}
+        )
 
         if "winner" in catalog:
-            catalog["winner"].update({boost["id"]: boost["status"] for boost in catalog["winner"].pop("boosts", [])})
+            catalog["winner"].update(
+                {
+                    boost["id"]: boost["status"]
+                    for boost in catalog["winner"].pop("boosts", [])
+                }
+            )
 
         return pd.json_normalize(catalog)
 
@@ -258,7 +283,9 @@ class MercadoLivreParser:
 
         seller_info = []
         for seller in self.response_data["results"]:
-            seller = seller | {f"shipping_{key}": value for key, value in seller["shipping"].items()}
+            seller = seller | {
+                f"shipping_{key}": value for key, value in seller["shipping"].items()
+            }
 
             seller["seller_city"] = seller["seller_address"]["city"]["name"]
             seller["seller_state"] = seller["seller_address"]["state"]["name"]
@@ -269,8 +296,7 @@ class MercadoLivreParser:
             seller = {
                 k: v
                 for k, v in seller.items()
-                if k
-                not in ["shipping", "seller_address"]
+                if k not in ["shipping", "seller_address"]
             }
 
             seller_info.append(seller)
@@ -379,9 +405,9 @@ class MercadoLivreAuthenticator:
         data = response.json()
 
         self._update_dotenv(data) if self.update_dotenv else None
-        
+
         return data
-    
+
     def _update_dotenv(self, data: dict[str, any]):
         if "access_token" in data:
             logging.info("Updating .env file with new access token")
