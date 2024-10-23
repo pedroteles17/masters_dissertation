@@ -1,8 +1,9 @@
 # %%
 import pandas as pd
+import time
 
 # %%
-sellers_data = pd.read_parquet("data/sellers_by_product/2024-10-22T01-46-06.parquet")
+sellers_data = pd.read_parquet("data/sellers_by_product/2024-10-22T17-34-45.parquet")
 
 sellers_data["smallest_price"] = sellers_data.groupby("product_id")["price"].transform(
     "min"
@@ -24,6 +25,7 @@ processed_data = (
 )
 
 # %%
+"""
 # To avoid dealing with huge imalanced data, we will only consider the buy box winner and X listings with the smallest price per product.
 buy_box_winners = processed_data.copy().query('competition_status == "buy_box_winner"')
 
@@ -32,12 +34,12 @@ competitors = (
     .query('competition_status != "buy_box_winner"')
     .sort_values(by=["product_id", "price"])
     .groupby("product_id")
-    .head(19)
+    .head(49)
     .reset_index(drop=True)
 )
 
 processed_data = pd.concat([buy_box_winners, competitors])
-
+"""
 # %%
 # Now we will process the data to extract the features we want to analyze.
 processed_data = (
@@ -112,3 +114,6 @@ processed_data = (
 ]
 
 # %%
+processed_data.to_parquet(f"data/processed_data.parquet")
+
+#%%
