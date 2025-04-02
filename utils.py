@@ -135,8 +135,13 @@ class MercadoLivreScraper:
             return MercadoLivreParser(data).parse_sellers_by_product()
         return {"product_id": product_id} | response.json() if response else None
 
-    def search_by_term(self, term: str) -> dict[str, any]:
-        url = f"{self.URL}sites/MLB/search?q={term}"
+    def search_by_identifier(self, identifier: str) -> dict[str, any]:
+        url = f"{self.URL}products/search?status=active&site_id=MLB&product_identifier={identifier}"
+        response = MakeRequest(None, self._get_headers()).get(url)
+        return response.json() if response else None
+
+    def search_by_query(self, query: str) -> dict[str, any]:
+        url = f"{self.URL}sites/MLB/search?q={query}"
         response = MakeRequest(None, self._get_headers()).get(url)
         return response.json() if response else None
 

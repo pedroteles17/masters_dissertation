@@ -11,11 +11,13 @@ logging.basicConfig(level=logging.INFO)
 
 # %%
 # Update the access token
-# MercadoLivreAuthenticator().get_access_from_refresh_token()
+#MercadoLivreAuthenticator().get_access_from_refresh_token()
 
 # %%
 # Load the best sellers product list
-products_barcode = pd.read_excel("data/best_sellers.xls", dtype=str)["barcode"].tolist()[:10]
+products_barcode = pd.read_excel(
+    "data/best_sellers_nielsen.ods", dtype=str, engine="odf"
+)["ISBN"].tolist()[:2000]
 
 scraper = MercadoLivreScraper(parse=True)
 
@@ -26,22 +28,13 @@ for barcode in tqdm(
     products_barcode, total=len(products_barcode), desc="Searching products"
 ):
     try:
-        product = scraper.search_by_term(barcode)
+        product = scraper.search_by_identifier(barcode)
         full_product_data.append(pd.json_normalize(product["results"][0]))
-        gtin = next(
-            (
-                attr["value_name"]
-                for attr in product["results"][0]["attributes"]
-                if attr["id"] == "GTIN"
-            ),
-            None,
-        )
-        gtin = gtin.split(",")[0] if gtin else None
         meli_products.append(
             {
                 "barcode": barcode,
-                "product_id": product["results"][0]["catalog_product_id"],
-                "extracted_barcode": gtin,
+                "product_id": product["results"][0]["id"],
+                "name": product["results"][0]["name"],
             }
         )
     except Exception as e:
@@ -50,14 +43,13 @@ for barcode in tqdm(
 full_product_data = (
     pd.concat(full_product_data)
     .reset_index(drop=True)
-    .to_parquet(f'data/product_metadata/{time.strftime("%Y-%m-%dT%H-%M-%S")}.parquet')
 )
+
+full_product_data.to_parquet(f'data/product_metadata/{time.strftime("%Y-%m-%dT%H-%M-%S")}.parquet')
 
 meli_products = (
     pd.DataFrame(meli_products)
-    .query("barcode == extracted_barcode")
     .dropna(subset=["product_id"])
-    .drop(columns=["extracted_barcode"])
     .reset_index(drop=True)
 )
 

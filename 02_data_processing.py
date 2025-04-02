@@ -3,47 +3,60 @@ import pandas as pd
 import time
 
 # %%
-sellers_data = pd.read_parquet("data/sellers_by_product/2024-10-22T17-34-45.parquet")
+sellers_data = pd.read_parquet("data/sellers_by_product/2025-02-19T17-15-50.parquet")
 
 sellers_data["smallest_price"] = sellers_data.groupby("product_id")["price"].transform(
     "min"
 )
 
 # %%
+# To compete, sellers must offer new products, have an active account and have a seller level of at least 3_yellow.
+## https://www.mercadolivre.com.br/ajuda/4676 (not sure if it is a permanent link)
+processed_data = (
+    sellers_data.copy()
+    .query('condition == "new"')
+    .query('seller_site_status == "active"')
+    .query('seller_level_id in ["3_yellow", "4_light_green", "5_green"]')
+)
+
 # Sellers can have multiple listings for the same product, even with the same listing type.
 ## We need to remove duplicates to avoid biasing the analysis.
 ## We will keep the listing with the smallest price or the buy box winner listing.
 processed_data = (
     sellers_data.copy()
-    .query('condition == "new"')
-    .query('seller_site_status == "active"')
     .sort_values(by=["competition_status", "price"])
     .drop_duplicates(
-        subset=["product_id", "seller_id", "listing_type_id"], keep="first"
+        subset=["product_id", "seller_id"], keep="first"
     )
     .reset_index(drop=True)
 )
 
-# %%
-"""
-# To avoid dealing with huge imalanced data, we will only consider the buy box winner and X listings with the smallest price per product.
-buy_box_winners = processed_data.copy().query('competition_status == "buy_box_winner"')
-
-competitors = (
-    processed_data.copy()
-    .query('competition_status != "buy_box_winner"')
-    .sort_values(by=["product_id", "price"])
+buy_boxes_with_no_winner = (
+    processed_data
+    .assign(
+        buy_box_winner=lambda x: x["competition_status"].apply(
+            lambda status: 1 if status == "buy_box_winner" else 0
+        )
+    )
     .groupby("product_id")
-    .head(49)
-    .reset_index(drop=True)
+    .agg(
+        buy_box_winner=("buy_box_winner", "sum")
+    )
+    .query("buy_box_winner == 0")
 )
 
-processed_data = pd.concat([buy_box_winners, competitors])
-"""
+# We remove products that do not have a buy box winner.
+## We cannot predict the buy box winner if there is no buy box winner.
+processed_data = (
+    processed_data
+    .query("product_id not in @buy_boxes_with_no_winner.index")
+)
+
 # %%
 # Now we will process the data to extract the features we want to analyze.
 processed_data = (
     processed_data.assign(
+        pct_price_diff=lambda x: (x["price"] - x["smallest_price"]) / x["smallest_price"],
         price_diff=lambda x: x["price"] - x["smallest_price"],
         premium_listing=lambda x: x["listing_type_id"].apply(
             lambda id: 1 if id == "gold_pro" else 0
@@ -59,6 +72,9 @@ processed_data = (
         ),
         store_pickup=lambda x: x["shipping_store_pick_up"].apply(
             lambda pickup: 1 if pickup else 0
+        ),
+        drop_off=lambda x: x["shipping_logistic_type"].apply(
+            lambda logistic: 1 if logistic == "drop_off" else 0
         ),
         fullfilment=lambda x: x["shipping_logistic_type"].apply(
             lambda logistic: 1 if logistic == "fulfillment" else 0
@@ -97,6 +113,7 @@ processed_data = (
         "seller_id",
         "seller_nickname",
         "price_diff",
+        "pct_price_diff",
         "premium_listing",
         "official_store",
         "meli_direct_seller",
@@ -112,6 +129,28 @@ processed_data = (
         "buy_box_winner",
     ]
 ]
+
+#%%
+# To give more context to the model, we will add features that aggregate information about the competition.
+competition_features = (
+    processed_data
+        .groupby("product_id")
+        .agg(
+            n_competitors=("seller_id", "count"),
+            premium_listing_pct=("premium_listing", "mean"),
+            official_store_pct=("official_store", "mean"),
+            free_shipping_pct=("free_shipping", "mean"),
+            fullfilment_pct=("fullfilment", "mean"),
+            flex_shipping_pct=("flex_shipping", "mean"),
+            seller_level_mean=("seller_level", "mean"),
+            power_seller_mean=("power_seller", "mean"),
+            seller_transactions_total_mean=("seller_transactions_total", "mean"),
+        )
+)
+
+processed_data = processed_data.merge(
+    competition_features, on="product_id", how="left"
+)
 
 # %%
 processed_data.to_parquet(f"data/processed_data.parquet")
