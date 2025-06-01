@@ -153,6 +153,8 @@ processed_data = processed_data.merge(
 )
 
 # %%
-processed_data.to_parquet(f"data/processed_data.parquet")
+processed_data.to_parquet(
+    f'data/processed_data/{time.strftime("%Y-%m-%dT%H-%M-%S")}.parquet'
+)
 
 #%%

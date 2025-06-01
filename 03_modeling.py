@@ -1,12 +1,10 @@
 #%%
 import pandas as pd
-import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
 import time
 from tqdm import tqdm
 
-from sklearn.svm import SVC
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from sklearn.linear_model import LogisticRegression
@@ -14,7 +12,6 @@ from sklearn.ensemble import RandomForestClassifier
 from lightgbm import LGBMClassifier
 from pytorch_tabnet.tab_model import TabNetClassifier
 
-from sklearn.metrics import roc_curve, auc
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 from sklearn.utils.class_weight import compute_sample_weight, compute_class_weight
@@ -22,7 +19,7 @@ from sklearn.utils.class_weight import compute_sample_weight, compute_class_weig
 #%%
 # We drop 'store_pickup' column because it has a single value for all observations.
 data = (
-    pd.read_parquet("data/processed_data.parquet")
+    pd.read_parquet("data/processed_data/2025-06-01T19-09-22.parquet")
     .drop(columns=["store_pickup", "seller_nickname"])
     .set_index(["product_id", "seller_id"])
 )
@@ -170,58 +167,23 @@ lowest_price_fullfilment_dummy = pd.concat(lowest_price_fullfilment_dummy)\
 predictions = pd.concat([predictions, lowest_price_fullfilment_dummy])
 
 #%%
+# Save predictions
+predictions.to_parquet(
+    f'data/predictions/{time.strftime("%Y-%m-%dT%H-%M-%S")}.parquet'
+)
+
+#%%
 classification_report(
     lowest_price_fullfilment_dummy["buy_box_winner"], lowest_price_fullfilment_dummy["max_prob_flag"],
     output_dict=True
 )
 
 #%%
-product_ids = data.index.get_level_values("product_id").unique()
-
-train_product_ids, test_product_ids = train_test_split(
-    product_ids, test_size=0.3, random_state=42
-)
-
-train_data, test_data = data.loc[train_product_ids], data.loc[test_product_ids]
-
-#%%
-X_train, y_train = train_data.drop(columns=["buy_box_winner"]), train_data["buy_box_winner"]
-
-X_test, y_test = test_data.drop(columns=["buy_box_winner"]), test_data["buy_box_winner"]
-
-imbalance_proportion = y_train.value_counts()[0] / y_train.value_counts()[1]
-
-#%%
-train_data = lgb.Dataset(X_train, label=y_train)
-
-# Train the model
-lgb_train = lgb.train(
-    params={
-        "objective": "binary",
-        "metric": "auc",
-        "scale_pos_weight": imbalance_proportion,
-    },
-    train_set=train_data
-)
-
-#%%
-y_pred_prob = lgb_train.predict(X_test)
-
-y_test = (
-    pd.DataFrame(y_test)
-        .reset_index()
-        .assign(y_pred_prob=y_pred_prob)
-        .groupby("product_id")
-        .apply(lambda df: df.assign(max_prob_flag=(df['y_pred_prob'] == df['y_pred_prob'].max()).astype(int)))
-        .reset_index(drop=True)
-)
-
-#%%
-classification_report(y_test["buy_box_winner"], y_test["max_prob_flag"], output_dict=True)
-
-#%%
 # Model feature importance
-feature_importance = lgb_train.feature_importance(importance_type="gain")
+if not models[0].__class__.__name__ == "LGBMClassifier":
+    raise Exception("Wrong model selected")
+
+feature_importance = models[0].booster_.feature_importance(importance_type="gain")
 
 feature_importance_df = pd.DataFrame({
     "Feature": X_train.columns,
