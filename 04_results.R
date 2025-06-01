@@ -1,6 +1,6 @@
 # Import libraries and source utility functions ----
 if (!require("pacman")) install.packages("pacman")
-pacman::p_load(tidyverse, arrow, stargazer, pscl, tidyr)
+pacman::p_load(tidyverse, arrow, stargazer, pscl, tidyr, caret, ggrepel)
 `%ni%` <- Negate(`%in%`)
 source('utils.R')
 
@@ -140,3 +140,87 @@ stargazer(
   no.space = TRUE, single.row=TRUE,
   column.sep.width="1pt"
 )
+
+# Table 3 - Prediction Results ----
+linear_models <- c("LogisticRegression")
+ensemble_models <- c("RandomForestClassifier", "LGBMClassifier", "CatBoostClassifier", "XGBClassifier")
+deep_learning_models <- c("TabNetClassifier")
+dummy_models <- c("LowestPriceDummy", "LowestPriceFullfilmentDummy")
+
+predictions <- read_parquet("results/predictions.parquet")
+
+model_pred <- predictions %>% 
+  dplyr::filter(model_name == "LGBMClassifier")
+
+actual <- model_pred$buy_box_winner
+predicted <- model_pred$max_prob_flag
+
+prediction_results_data <- predictions %>% 
+  group_by(model_name) %>%
+  summarise(
+    precision = precision_recall_f1(buy_box_winner, max_prob_flag)[1],
+    recall = precision_recall_f1(buy_box_winner, max_prob_flag)[2],
+    f1_score = precision_recall_f1(buy_box_winner, max_prob_flag)[3],
+    mcc = matthews_correlation_coefficient(buy_box_winner, max_prob_flag),
+    running_time = mean(execution_time)
+  ) %>% 
+  #Format table to export
+  mutate(model_name = recode(
+    model_name,
+    "CatBoostClassifier" = "CatBoost",
+    "LGBMClassifier" = "Light GBM",
+    "LogisticRegression" = "Logistic Reg.",
+    "LowestPriceDummy" = "Dummy Price",
+    "LowestPriceFullfilmentDummy" = "Dummy Price-Full",
+    "RandomForestClassifier" = "Random Forest",
+    "TabNetClassifier" = "TabNet",
+    "XGBClassifier" = "XGBoost"
+  )) %>% 
+  mutate_at(
+    vars(precision, recall, f1_score, mcc),
+    ~ round(.x*100, 2)
+  ) %>%
+  mutate_at(
+    vars(running_time),
+    ~ round(.x, 2)
+  ) %>%
+  arrange(
+    desc(precision)
+  ) %>%
+  rename_with(
+    ~ format_names(.x)
+  ) %>% 
+  rename(`MCC` = `Mcc`, `Run. Time` = `Running Time`) %>% 
+  column_to_rownames(var = "Model Name")
+
+stargazer(prediction_results_data, 
+          type = "latex", 
+          summary = FALSE,  # Disable summary statistics
+          rownames = TRUE,
+          title = "Prediction Results",
+          digits=2)
+
+# AUC-PR
+probs <- lgbm_results$y_pred_prob
+
+fg <- probs[lgbm_results$buy_box_winner == 1]
+bg <- probs[lgbm_results$buy_box_winner == 0]
+
+roc <- roc.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(roc)
+
+pr.curve(lgbm_results$buy_box_winner, lgbm_results$max_prob_flag, curve = TRUE)
+
+
+figure3 <- ggplot(prediction_results_data, aes(x = running_time, y = precision)) +
+  geom_point(aes(color = model_group)) + #size = running_time,
+  geom_label_repel(label = prediction_results_data$model_name,  size=3.5) +
+  scale_size_continuous(range = c(1, 15)) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_classic() +
+  xlab("Precision") + ylab("Recall") +
+  labs(color = "Model", size = "Exe. Time") + 
+  theme(axis.title.x = element_text(vjust=-0.5),
+        axis.title.y = element_text(vjust=1.5))
+
+rm(running_time, tercile_returns_regres, out_of_sample_r2, plot3_data)
