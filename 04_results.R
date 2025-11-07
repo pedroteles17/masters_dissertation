@@ -149,11 +149,15 @@ dummy_models <- c("LowestPriceDummy", "LowestPriceFullfilmentDummy")
 
 predictions <- read_parquet("data/predictions/2025-06-01T19-26-44.parquet")
 
-model_pred <- predictions %>% 
-  dplyr::filter(model_name == "LGBMClassifier")
+predictions_ft <- read_parquet("data/predictions/2025-11-06T21-28-29_fine_tuned.parquet")
 
-actual <- model_pred$buy_box_winner
-predicted <- model_pred$max_prob_flag
+predictions <- bind_rows(predictions, predictions_ft)
+
+#model_pred <- predictions %>% 
+#  dplyr::filter(model_name == "LGBMClassifier")
+
+#actual <- model_pred$buy_box_winner
+#predicted <- model_pred$max_prob_flag
 
 prediction_results_data <- predictions %>% 
   group_by(model_name) %>%
@@ -174,7 +178,12 @@ prediction_results_data <- predictions %>%
     "LowestPriceFullfilmentDummy" = "Dummy Price-Full",
     "RandomForestClassifier" = "Random Forest",
     "TabNetClassifier" = "TabNet",
-    "XGBClassifier" = "XGBoost"
+    "XGBClassifier" = "XGBoost",
+    "LGBMClassifier_FT" = "Light GBM FT",
+    "RandomForestClassifier_FT" = "Random Forest FT",
+    "XGBClassifier_FT" = "XGBoost FT",
+    "CatBoostClassifier_FT" = "CatBoost FT",
+    "LogisticRegression_FT" = "Logistic Reg. FT"
   )) %>% 
   mutate_at(
     vars(precision, recall, f1_score, mcc),
