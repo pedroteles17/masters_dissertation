@@ -6,7 +6,197 @@ import pandas as pd
 import os
 import json
 from dotenv import set_key
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
+from xgboost import XGBClassifier
+from pytorch_tabnet.tab_model import TabNetClassifier
+from sklearn.metrics import precision_score
+from sklearn.utils.class_weight import compute_class_weight
 
+class OptunaOptimizer:
+    def __init__(self, X_train, y_train, X_valid, y_valid):
+        self.X_train = X_train
+        self.y_train = y_train
+        self.X_valid = X_valid
+        self.y_valid = y_valid
+
+    def objective_lightgbm(self, trial):
+        # Compute weight for imbalance
+        pos = np.sum(self.y_train == 1)
+        neg = np.sum(self.y_train == 0)
+        scale_pos_weight = neg / pos if pos > 0 else 1.0
+
+        params = {
+            "n_estimators": trial.suggest_int("n_estimators", 200, 2000),
+            "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.3, log=True),
+            "num_leaves": trial.suggest_int("num_leaves", 20, 3000),
+            "max_depth": trial.suggest_int("max_depth", 3, 20),
+            "min_child_samples": trial.suggest_int("min_child_samples", 5, 100),
+            "min_split_gain": trial.suggest_float("min_split_gain", 0.0, 1.0),
+            "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+            "scale_pos_weight": scale_pos_weight,
+            "random_state": 42,
+            "n_jobs": -1,
+        }
+
+        model = LGBMClassifier(**params, verbosity=-1)
+        model.fit(
+            self.X_train, self.y_train,
+            eval_set=[(self.X_valid, self.y_valid)],
+            eval_metric="average_precision"
+        )
+
+        preds = model.predict(self.X_valid)
+        score = precision_score(self.y_valid, preds, zero_division=0)
+        return score
+    
+    def objective_catboost(self, trial):
+        pos = np.sum(self.y_train == 1)
+        neg = np.sum(self.y_train == 0)
+        scale_pos_weight = neg / pos if pos > 0 else 1.0
+
+        params = {
+            "iterations": trial.suggest_int("iterations", 200, 2000),
+            "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.3, log=True),
+            "depth": trial.suggest_int("depth", 3, 10),
+            "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-8, 10.0, log=True),
+            "bagging_temperature": trial.suggest_float("bagging_temperature", 0.0, 1.0),
+            "random_strength": trial.suggest_float("random_strength", 0.0, 1.0),
+            "scale_pos_weight": scale_pos_weight,
+            "border_count": trial.suggest_int("border_count", 32, 255),
+            "verbose": 0,
+            "random_seed": 42,
+        }
+
+        model = CatBoostClassifier(**params)
+        model.fit(self.X_train, self.y_train, eval_set=(self.X_valid, self.y_valid), verbose=0)
+
+        preds = model.predict(self.X_valid)
+        score = precision_score(self.y_valid, preds, zero_division=0)
+        return score
+    
+    def objective_logistic_regression(self, trial):
+        # Compute class weight for imbalance
+        pos = np.sum(self.y_train == 1)
+        neg = np.sum(self.y_train == 0)
+        class_weight = {0: 1.0, 1: neg / pos if pos > 0 else 1.0}
+
+        params = {
+            "penalty": trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet"]),
+            "C": trial.suggest_float("C", 1e-3, 100.0, log=True),
+            "solver": trial.suggest_categorical("solver", ["saga", "liblinear"]),
+            "l1_ratio": trial.suggest_float("l1_ratio", 0.0, 1.0) if "elasticnet" in trial.params.get("penalty", "") else None,
+            "max_iter": 2000,
+            "random_state": 42,
+            "class_weight": class_weight,
+            "n_jobs": -1,
+        }
+
+        # Clean up unsupported combinations
+        if params["penalty"] != "elasticnet":
+            params.pop("l1_ratio", None)
+
+        # liblinear doesn't support elasticnet
+        if params["solver"] == "liblinear" and params["penalty"] == "elasticnet":
+            params["penalty"] = "l1"  # fallback to l1
+
+        model = LogisticRegression(**params)
+        model.fit(self.X_train, self.y_train)
+
+        preds = model.predict(self.X_valid)
+        score = precision_score(self.y_valid, preds, zero_division=0)
+        return score
+
+    def objective_xgboost(self, trial):
+        pos = np.sum(self.y_train == 1)
+        neg = np.sum(self.y_train == 0)
+        scale_pos_weight = neg / pos if pos > 0 else 1.0
+
+        params = {
+            "n_estimators": trial.suggest_int("n_estimators", 200, 2000),
+            "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.3, log=True),
+            "max_depth": trial.suggest_int("max_depth", 3, 20),
+            "min_child_weight": trial.suggest_float("min_child_weight", 1.0, 10.0),
+            "gamma": trial.suggest_float("gamma", 0.0, 2.0),
+            "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+            "scale_pos_weight": scale_pos_weight,
+            "random_state": 42,
+            "n_jobs": -1,
+            "eval_metric": "logloss",
+        }
+
+        model = XGBClassifier(**params)
+        model.fit(self.X_train, self.y_train,
+                  eval_set=[(self.X_valid, self.y_valid)],
+                  verbose=False)
+
+        preds = model.predict(self.X_valid)
+        score = precision_score(self.y_valid, preds, zero_division=0)
+        return score
+    
+    def objective_random_forest(self, trial):
+        params = {
+            "n_estimators": trial.suggest_int("n_estimators", 200, 1000),
+            "max_depth": trial.suggest_int("max_depth", 3, 40),
+            "min_samples_split": trial.suggest_int("min_samples_split", 2, 20),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 20),
+            "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2"]),
+            "class_weight": trial.suggest_categorical("class_weight", ["balanced", "balanced_subsample"]),
+            "random_state": 42,
+            "n_jobs": -1,
+        }
+
+        model = RandomForestClassifier(**params)
+        model.fit(self.X_train, self.y_train)
+
+        preds = model.predict(self.X_valid)
+        score = precision_score(self.y_valid, preds, zero_division=0)
+
+        return score
+
+    def objective_tabnet(self, trial):
+        params = {
+            "n_d": trial.suggest_int("n_d", 8, 64),
+            "n_a": trial.suggest_int("n_a", 8, 64),
+            "n_steps": trial.suggest_int("n_steps", 3, 8),
+            "gamma": trial.suggest_float("gamma", 1.0, 2.5),
+            "lambda_sparse": trial.suggest_float("lambda_sparse", 1e-6, 1e-3, log=True),
+            "momentum": trial.suggest_float("momentum", 0.01, 0.4),
+            "clip_value": trial.suggest_float("clip_value", 1.0, 2.0),
+            "optimizer_params": dict(lr=trial.suggest_float("learning_rate", 1e-3, 5e-2, log=True)),
+            "seed": 42,
+            "verbose": 0,
+        }
+
+        model = TabNetClassifier(**params)
+
+        # Class-weighted sample weights (helps with imbalance)
+        classes = np.array([0, 1])
+        cw = compute_class_weight(class_weight="balanced", classes=classes, y=self.y_train)
+        w_map = {c: w for c, w in zip(classes, cw)}
+        sample_weight = np.vectorize(w_map.get)(self.y_train.values if hasattr(self.y_train, "values") else self.y_train)
+
+        model.fit(
+            self.X_train.values, self.y_train.values,
+            eval_set=[(self.X_valid.values, self.y_valid.values)],
+            max_epochs=trial.suggest_int("max_epochs", 100, 300),
+            patience=trial.suggest_int("patience", 20, 60),
+            batch_size=trial.suggest_categorical("batch_size", [256, 512, 1024]),
+            virtual_batch_size=trial.suggest_categorical("virtual_batch_size", [32, 64, 128]),
+            weights=sample_weight,
+        )
+
+        preds = model.predict(self.X_valid.values)  # uses threshold=0.5
+        return precision_score(self.y_valid, preds, zero_division=0)
 
 class MakeRequest:
     def __init__(

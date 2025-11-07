@@ -5,7 +5,7 @@ pacman::p_load(tidyverse, arrow, stargazer, pscl, tidyr, caret, ggrepel)
 source('utils.R')
 
 # Load data ----
-data <- read_parquet("data/processed_data.parquet") %>% 
+data <- read_parquet("data/processed_data/2025-06-01T19-09-22.parquet") %>% 
   dplyr::select(!c("store_pickup", "seller_nickname")) %>% 
   mutate(
     flex_and_full = flex_shipping * fullfilment
@@ -147,7 +147,7 @@ ensemble_models <- c("RandomForestClassifier", "LGBMClassifier", "CatBoostClassi
 deep_learning_models <- c("TabNetClassifier")
 dummy_models <- c("LowestPriceDummy", "LowestPriceFullfilmentDummy")
 
-predictions <- read_parquet("results/predictions.parquet")
+predictions <- read_parquet("data/predictions/2025-06-01T19-26-44.parquet")
 
 model_pred <- predictions %>% 
   dplyr::filter(model_name == "LGBMClassifier")

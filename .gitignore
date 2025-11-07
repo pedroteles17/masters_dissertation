@@ -1,7 +1,12 @@
 # Data Files
+latex_file_history/
 data/
 catboost_info/
 *.png
+
+# R Data Files
+*.rda
+.Rhistory
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
